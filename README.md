@@ -414,6 +414,10 @@ This is App #1 in the **fintech-lab** series. Each app is independently runnable
 
 ---
 
+ADR means Architecture Decision Record
+
+---
+
 ## License
 
 MIT
