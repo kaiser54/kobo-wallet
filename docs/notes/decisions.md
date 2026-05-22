@@ -114,3 +114,65 @@ All amounts are `bigint` in kobo (1 NGN = 100 kobo). No floats anywhere. Naira i
 - `bigint` over `int` because plain int caps around ₦21M, which a real account will hit eventually.
 
 ---
+
+## ADR-007: Secrets in `.env.local`, Prisma reads it via dotenv-cli
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+- All secrets live in `.env.local` (gitignored).
+- `.env` is not used; Prisma's default behavior is overridden by prefixing every Prisma command with `dotenv -e .env.local --`.
+- Shortcut npm scripts (`db:migrate`, `db:studio`, etc.) bake this in so we never forget.
+
+### Why
+- Follows the Next.js convention for environment files.
+- A single source of truth for secrets avoids the "is it in .env or .env.local?" confusion.
+- The npm scripts mean every team member runs commands the same way.
+
+### What we're trading off
+- Slightly more verbose configuration than letting Prisma use its default `.env`.
+- Worth it: one secrets file, one place to check before committing.
+
+---
+
+## ADR-008: Prisma 7 with driver adapter (pg)
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+- Use Prisma 7 (not 6, not 5).
+- Use the `@prisma/adapter-pg` driver adapter with the `pg` driver for Postgres.
+- Database URL lives in `prisma.config.ts`, not in `schema.prisma`.
+- Generated Prisma Client goes to a project-controlled folder, not `node_modules`.
+
+### Why
+- Prisma 7 is the current version as of mid-2026; new fintech codebases will use it.
+- Driver adapters mean smaller bundles and the ability to deploy to edge runtimes if needed later.
+- Separating connection config (TS file) from schema (model definitions) is cleaner.
+
+### Trade-off
+- Less Stack Overflow coverage than Prisma 6 since 7 is newer.
+- One more package to install (`pg` + adapter) than the old all-in-one setup.
+
+---
+
+## ADR-009: Dependency vs devDependency classification
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+- `prisma` (the CLI) lives in `devDependencies`. It's used for migrations, generation, and Studio — never at app runtime.
+- `@prisma/client` (the runtime library) lives in `dependencies`. The app imports it.
+- General rule: if `import` it at runtime → dependency. If it's a CLI or build tool → devDependency.
+
+### Why
+- Production installs with `--prod` skip devDependencies. Anything misplaced is wasted bundle size and attack surface.
+- Misplacement is the most common dependency bug I see in junior codebases.
+
+### How to audit
+Ask of each package: "Does my running app `import` this?" If no, it's a dev dependency.
+
+---
