@@ -176,3 +176,78 @@ All amounts are `bigint` in kobo (1 NGN = 100 kobo). No floats anywhere. Naira i
 Ask of each package: "Does my running app `import` this?" If no, it's a dev dependency.
 
 ---
+
+## ADR-010: Soft delete for users and wallets; hard delete blocked at FK level
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+- Add nullable `deletedAt` column to `User` and `Wallet`.
+- Change all `onDelete` FK behaviors to `Restrict`. No hard deletes from app code.
+- `Transaction` table has no soft delete — ledger entries are immutable.
+- All queries of User/Wallet go through wrapper functions in `lib/` that filter `deletedAt: null`.
+
+### Why
+- Financial regulations require multi-year transaction retention.
+- Anonymization (not deletion) is the right answer to "delete my account" when history exists.
+- Database-level FK restrictions prevent accidental hard deletes via buggy code.
+
+### Trade-off accepted
+- Slightly larger tables over time (deleted rows aren't reclaimed).
+- Every query needs the `deletedAt: null` filter; forgotten filters can leak deleted data into UI.
+- Mitigated by funneling all queries through `lib/` wrappers.
+
+---
+
+## ADR-011: JWT sessions (not database sessions)
+
+**Date:** [today]
+**Status:** Forced by Auth.js Credentials provider
+
+### Decision
+Use Auth.js v5 JWT sessions. No `Session` table. No `Account` table (no OAuth providers).
+
+### Why
+- Auth.js v5's Credentials provider supports ONLY JWT sessions. This isn't optional — database sessions are blocked at the framework level for Credentials.
+- Smaller schema, fewer moving parts.
+- One DB hit saved per authenticated request (no session table lookup).
+
+### Trade-off
+- Can't revoke a session server-side without extra work (e.g. a token blocklist).
+- For App #1's threat model, this is fine. For a real production fintech, we'd add a server-side revocation mechanism (often via a "tokens issued after this timestamp are invalid" column on User, bumped on logout/password-change).
+
+### What we still keep
+- `VerificationToken` table — Auth.js adapter requires it even with JWT sessions.
+- Our own `PasswordResetToken` table — Credentials provider doesn't include reset; we build it ourselves.
+
+---
+
+## ADR-012: Multi-file Prisma schema, organized by bounded context
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+Split `schema.prisma` into a `prisma/schema/` folder with one file per bounded context:
+- `config.prisma` — generator + datasource
+- `auth.prisma` — User, Role, VerificationToken, PasswordResetToken
+- `wallet.prisma` — Wallet, Transaction, TransactionType, TransactionStatus
+
+### Why
+- For App #1 specifically, a single file would be fine (only 6 models).
+- BUT: learning the split pattern now means it's already in place when the codebase grows.
+- Bounded contexts give clear PR boundaries — billing changes never touch auth files.
+- Each file fits on a screen; no scrolling to find a model.
+- Multi-file is now a first-class Prisma feature (was a preview, became stable).
+
+### Trade-off
+- One more concept to understand vs single file.
+- Need to update `prisma.config.ts` to point at a folder, not a file.
+- Worth it: the cost of splitting later is much higher than the cost of starting split.
+
+### When to split (heuristics for future projects)
+- Single file: <15 models, tight coupling, small team
+- Multiple files: >15 models, clear domain clustering, multiple teams
+
+---
