@@ -251,3 +251,46 @@ Split `schema.prisma` into a `prisma/schema/` folder with one file per bounded c
 - Multiple files: >15 models, clear domain clustering, multiple teams
 
 ---
+
+## ADR-013: Prisma 7 import path — use /client explicitly
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+Always import `PrismaClient` from `@/lib/generated/prisma/client`, not from `@/lib/generated/prisma` (the folder).
+
+### Why
+- Prisma 7's `prisma-client` generator produces multiple files: `client.ts`, `models.ts`, `enums.ts`, `commonInputTypes.ts`, etc.
+- The folder-level import is ambiguous and can resolve to the wrong barrel file, producing a `PrismaClient` instance whose model methods (`.user`, `.wallet`) are undefined.
+- Importing directly from `client.ts` is unambiguous and matches the official Prisma 7 docs.
+
+### Symptom of getting this wrong
+`prisma.user` (or any model accessor) is `undefined` at runtime. The import resolves and the type checks pass, but the instance has no model methods.
+
+### Future-proof
+If Prisma reorganizes their generated output in 8.x, we may need to revisit. For now, `/client` is correct.
+
+---
+
+## ADR-014: Project is ESM (`"type": "module"` in package.json)
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+Set `"type": "module"` in package.json. The whole project is ESM, not CommonJS.
+
+### Why
+- Prisma 7's generated client (`prisma-client` provider) is ESM-only. Without this, tsx loads it as CommonJS and model methods (`.user`, `.wallet`) come back undefined.
+- Next.js 16 is ESM-friendly by default; no compatibility issues there.
+- Modern JavaScript is ESM. Anything CommonJS-only in 2026 is legacy.
+
+### Symptom of getting this wrong
+`prisma.user` is undefined at runtime. The import succeeds, types check, but the instance has no model methods. Error stack shows CJS loader (`Module._compile (node:internal/modules/cjs/loader...)`).
+
+### Impact
+- All relative imports must include extensions in standalone scripts run by tsx. Next.js's bundler handles this automatically for app code.
+- Any CommonJS-only npm package may need workarounds. None encountered so far.
+
+---
