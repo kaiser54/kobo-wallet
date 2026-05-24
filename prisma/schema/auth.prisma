@@ -1,0 +1,104 @@
+// =============================================================================
+// AUTH BOUNDED CONTEXT
+// =============================================================================
+// User accounts, roles, and password reset.
+// Auth.js's VerificationToken lives here too — it's auth-related plumbing.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// USERS
+// -----------------------------------------------------------------------------
+// The application's user table. Auth.js will reference this via its adapter,
+// but we own the schema fully — we're not letting Auth.js dictate user fields.
+//
+// Soft delete via deletedAt. Users with transaction history are anonymized,
+// not hard-deleted. Hard delete is blocked by FK constraints (onDelete: Restrict).
+//
+// Every query of this table MUST filter `deletedAt: null` unless explicitly
+// looking at deleted users (admin restore flow, audit). See lib/users.ts.
+//
+// WHY a separate password_hash column instead of relying on Auth.js's "Account"
+// model: the Credentials provider in Auth.js v5 doesn't manage passwords for
+// you — you store and verify them yourself. This is intentional; passwords are
+// the most sensitive data in the app and should be explicit, not hidden inside
+// a generic OAuth-account table.
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  name          String?
+  role          Role      @default(USER)
+  emailVerified DateTime? @map("email_verified")
+  deletedAt     DateTime? @map("deleted_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  wallet               Wallet?
+  transactions         Transaction[]
+  passwordResetTokens  PasswordResetToken[]
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+enum Role {
+  USER  @map("user")
+  ADMIN @map("admin")
+
+  @@map("user_role")
+}
+
+// -----------------------------------------------------------------------------
+// VERIFICATION TOKEN (Auth.js plumbing)
+// -----------------------------------------------------------------------------
+// Used internally by Auth.js for one-off token flows. We don't read/write
+// to this table from our code — Auth.js's adapter manages it. We include it
+// because the Prisma adapter expects this exact shape.
+//
+// NOTE: Even though we use JWT sessions (Credentials provider can't use
+// database sessions in Auth.js v5), the adapter still requires this table.
+// Leave it; don't query it.
+// -----------------------------------------------------------------------------
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// -----------------------------------------------------------------------------
+// PASSWORD RESET TOKEN
+// -----------------------------------------------------------------------------
+// Auth.js v5's Credentials provider does NOT include password reset out of
+// the box — we build it ourselves. This is the storage for that flow.
+//
+// WHY tokenHash and not token: we hash reset tokens before storing them.
+// Same principle as passwords. If the DB ever leaks, the leaked hashes
+// can't be used directly to reset anyone's password.
+//
+// WHY usedAt instead of just deleting: audit trail. Single-use is enforced
+// by checking `usedAt IS NULL` before accepting.
+//
+// WHY expiresAt: reset tokens have a short lifetime (1 hour).
+// -----------------------------------------------------------------------------
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}

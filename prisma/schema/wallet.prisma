@@ -1,0 +1,96 @@
+// =============================================================================
+// WALLET BOUNDED CONTEXT
+// =============================================================================
+// Wallets and the transaction ledger. The heart of the app.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// WALLETS
+// -----------------------------------------------------------------------------
+// One wallet per user, for App #1. The balance_kobo is a CACHED aggregate —
+// the source of truth is the sum of ledger entries in `transactions`. The
+// cache is updated atomically inside the same DB transaction that inserts a
+// ledger row, so the two cannot drift under normal operation. A reconciliation
+// script verifies this invariant.
+//
+// Soft-deleted alongside the user. Hard delete is blocked by Transaction's FK
+// onDelete: Restrict (a wallet with any transaction cannot be hard-deleted).
+//
+// NOTE: We use BigInt for balance_kobo because regular Int caps around ₦21M
+// in kobo (~21 million × 100). Real wallets will hit this. BigInt is mapped
+// to PostgreSQL's `bigint` (8 bytes, signed, range up to ~9.2 quintillion).
+// -----------------------------------------------------------------------------
+
+model Wallet {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @unique @map("user_id") @db.Uuid
+  balanceKobo BigInt    @default(0) @map("balance_kobo")
+  currency    String    @default("NGN") @db.VarChar(3)
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transactions Transaction[]
+
+  @@index([deletedAt])
+  @@map("wallets")
+}
+
+// -----------------------------------------------------------------------------
+// TRANSACTIONS (the ledger)
+// -----------------------------------------------------------------------------
+// Every movement of money is a row here. Balance is derived; this table is
+// authoritative.
+//
+// WHY `reference` is unique: this is the idempotency anchor. If a webhook
+// arrives twice for the same payment, the second INSERT fails at the database
+// level — no race condition, no application-level check required.
+//
+// WHY `amountKobo` is always positive: the `type` field carries the sign.
+// Using negative numbers for debits is a bug waiting to happen (sign mistakes
+// in aggregations are the worst kind of fintech bug — silent and compounding).
+//
+// WHY `userId` is denormalized here even though Wallet → User exists: admin
+// queries like "show me every transaction for user X" become a single index
+// lookup instead of a join. For a ledger that grows fast, this matters.
+// -----------------------------------------------------------------------------
+
+model Transaction {
+  id         String            @id @default(uuid()) @db.Uuid
+  walletId   String            @map("wallet_id") @db.Uuid
+  userId     String            @map("user_id") @db.Uuid
+  reference  String            @unique
+  type       TransactionType
+  amountKobo BigInt            @map("amount_kobo")
+  status     TransactionStatus @default(PENDING)
+  source     String
+  gateway    String?
+  gatewayRef String?           @map("gateway_ref")
+  metadata   Json?
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([walletId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  CREDIT @map("credit")
+  DEBIT  @map("debit")
+
+  @@map("transaction_type")
+}
+
+enum TransactionStatus {
+  PENDING @map("pending")
+  SUCCESS @map("success")
+  FAILED  @map("failed")
+
+  @@map("transaction_status")
+}
