@@ -294,3 +294,22 @@ Set `"type": "module"` in package.json. The whole project is ESM, not CommonJS.
 - Any CommonJS-only npm package may need workarounds. None encountered so far.
 
 ---
+
+## ADR-015: TypeScript target ES2022
+
+**Date:** [today]
+**Status:** Accepted
+
+### Decision
+`tsconfig.json` targets ES2022 (was ES2017, the Next.js default for old browser support).
+
+### Why
+- Enables BigInt literals (`100n`), required for our money operations on `bigint` types.
+- Enables nullish coalescing, optional chaining, top-level await, `globalThis`.
+- Node 22 and all modern browsers support ES2022 natively.
+- Next.js handles any further transpilation for older clients independently of this setting.
+
+### Why not ESNext
+ESNext is a moving target — features can change spec mid-development. ES2022 is the stable, universally-supported standard in 2026.
+
+---
